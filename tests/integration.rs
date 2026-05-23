@@ -63,10 +63,7 @@ mod live {
 
     #[test]
     fn stdin_host() {
-        tlsdays()
-            .write_stdin("github.com\n")
-            .assert()
-            .success();
+        tlsdays().write_stdin("github.com\n").assert().success();
     }
 }
 

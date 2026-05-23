@@ -1,14 +1,12 @@
 #![forbid(unsafe_code)]
 
-use std::io::{self, BufRead, IsTerminal, Write};
+use std::io::{self, BufRead, IsTerminal};
 use std::process::ExitCode;
 use std::time::Duration;
 
 use clap::Parser;
 use futures::stream::{self, StreamExt};
-use tlsdays::{
-    check_host, FormatKind, Formatter, HostRecord, HostTarget, TlsdaysError,
-};
+use tlsdays::{check_host, FormatKind, HostRecord, HostTarget, TlsdaysError};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -60,7 +58,9 @@ fn parse_host_entry(entry: &str, default_port: u16) -> Result<HostTarget, Tlsday
             } else if rest.is_empty() {
                 default_port
             } else {
-                return Err(TlsdaysError::Argument(format!("invalid host spec: {entry}")));
+                return Err(TlsdaysError::Argument(format!(
+                    "invalid host spec: {entry}"
+                )));
             }
         } else {
             default_port
@@ -104,7 +104,8 @@ fn collect_hosts(cli: &Cli) -> Result<Vec<HostTarget>, TlsdaysError> {
         let stdin = io::stdin();
         let lines = stdin.lock().lines();
         for line in lines {
-            let line = line.map_err(|e| TlsdaysError::Argument(format!("stdin read error: {e}")))?;
+            let line =
+                line.map_err(|e| TlsdaysError::Argument(format!("stdin read error: {e}")))?;
             let trimmed = line.trim();
             if trimmed.is_empty() {
                 continue;
@@ -154,11 +155,20 @@ fn exit_code(records: &[HostRecord], strict_fail: bool) -> u8 {
 
 #[tokio::main]
 async fn main() -> ExitCode {
+    if rustls::crypto::ring::default_provider()
+        .install_default()
+        .is_err()
+    {
+        eprintln!("failed to install rustls crypto provider");
+        return ExitCode::from(2);
+    }
+
     let cli = match Cli::try_parse() {
         Ok(cli) => cli,
         Err(e) => {
+            let code = e.exit_code();
             e.print().expect("stderr");
-            return ExitCode::from(2);
+            return ExitCode::from(code as u8);
         }
     };
 
@@ -182,14 +192,11 @@ async fn main() -> ExitCode {
     let concurrent = cli.concurrent.max(1);
 
     let results: Vec<HostRecord> = stream::iter(hosts)
-        .map(|target| {
-            let timeout = timeout;
-            async move {
+        .map(|target| async move {
                 match check_host(&target.host, target.port, timeout).await {
                     Ok(info) => HostRecord::success(&info),
                     Err(e) => HostRecord::failure(&target.host, target.port, &e.to_string()),
                 }
-            }
         })
         .buffer_unordered(concurrent)
         .collect()
@@ -197,18 +204,7 @@ async fn main() -> ExitCode {
 
     let stdout = io::stdout();
     let mut handle = stdout.lock();
-    let mut formatter = format.formatter(Box::new(&mut handle));
-    if let Err(e) = formatter.write_header() {
-        eprintln!("output error: {e}");
-        return ExitCode::from(2);
-    }
-    for record in &results {
-        if let Err(e) = formatter.write_one(record) {
-            eprintln!("output error: {e}");
-            return ExitCode::from(2);
-        }
-    }
-    if let Err(e) = formatter.write_footer() {
+    if let Err(e) = format.write_results(&mut handle, &results) {
         eprintln!("output error: {e}");
         return ExitCode::from(2);
     }
