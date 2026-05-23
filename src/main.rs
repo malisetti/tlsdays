@@ -193,10 +193,10 @@ async fn main() -> ExitCode {
 
     let results: Vec<HostRecord> = stream::iter(hosts)
         .map(|target| async move {
-                match check_host(&target.host, target.port, timeout).await {
-                    Ok(info) => HostRecord::success(&info),
-                    Err(e) => HostRecord::failure(&target.host, target.port, &e.to_string()),
-                }
+            match check_host(&target.host, target.port, timeout).await {
+                Ok(info) => HostRecord::success(&info),
+                Err(e) => HostRecord::failure(&target.host, target.port, &e.to_string()),
+            }
         })
         .buffer_unordered(concurrent)
         .collect()
